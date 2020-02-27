@@ -1,0 +1,78 @@
+# master ブランチ or v* にマッチするタグが push されたときに処理を起動する
+trigger:
+  branches:
+    include:
+      - master
+  tags:
+    include:
+      - v*
+# 共通変数
+variables:
+  # version tag か否かのフラグ
+  isVersionTag: ${{startsWith(variables['Build.SourceBranch'], 'refs/tags/v')}}
+stages:
+  # master かつ version tag がないときだけ test する
+  - stage: test
+    displayName: unit and integration test
+    condition: and(succeeded(), eq(variables['isVersionTag'], 'false'))
+    jobs:
+      - job: test_job
+      # python のバージョンを変えて test したほうがいいかも
+        strategy:
+          matrix:
+            linux:
+              imageName: 'ubuntu-latest'
+              activateDir: bin 
+            mac:
+              imageName: "macos-latest"
+              activateDir: bin
+            windows:
+              imageName: "windows-latest"
+              activateDir: Scripts
+        pool:
+          vmImage: $(imageName)
+        steps:
+          - task: UsePythonVersion@0
+            displayName: Use Python3.8
+            inputs:
+              versionSpec: '3.8'
+          - bash: |
+              python -m pip install -U pip
+              pip install poetry
+              python -m venv ./.venv
+              poetry install
+            displayName: setup test
+          - bash: |
+              export PYTHONUTF8=1
+              source ./.venv/$(activateDir)/activate
+              pytest --junitxml=test-result\test-results.xml
+            displayName: test using pytest
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFiles: "**/test-*.xml"
+              testRunTitle: "test results for $(imageName)"
+  
+  # version tag がついてたら，Release 処理を行う 
+  - stage: upload_to_pypi
+    displayName: upload
+    condition: eq(variables['isVersionTag'], 'true')
+    jobs:
+      - job: upload
+        steps:
+          - task: DownloadSecureFile@1
+            name: mySecureFile
+            inputs:
+              secureFile: token
+          - task: UsePythonVersion@0
+            displayName: Use Python3.8
+            inputs:
+                versionSpec: '3.8'
+          - script: |
+              python -m pip install -U pip
+              pip install poetry
+              cat $(mySecureFile.secureFilePath) | xargs poetry config pypi-token.pypi
+            displayName: setup upload to pypi
+          - script: |
+              poetry publish --build
+            displayName: upload

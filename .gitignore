@@ -1,0 +1,8 @@
+.pytest_cache
+.venv
+.vscode/
+poetry.lock
+__pycache__/
+*.egg-info/
+build/
+dist/
